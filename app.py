@@ -200,9 +200,9 @@ if isinstance(top3,pd.DataFrame) and not top3.empty:
     if auto_buy and st.button("TOP3 안전 자동매수 실행"):
         held={str(x[0]).zfill(6) for x in con.execute("SELECT code FROM portfolio WHERE qty>0").fetchall()}
         bought=[]
-        for r in top3.itertuples(index=False):
-            code=str(getattr(r,"종목코드")).zfill(6); name=str(getattr(r,"종목"))
-            score=float(getattr(r,"점수")); grade=str(getattr(r,"등급")); entry=float(getattr(r,"1차매수"))
+        for _, r in top3.iterrows():
+            code=str(r["종목코드"]).zfill(6); name=str(r["종목"])
+            score=float(r["점수"]); grade=str(r["등급"]); entry=float(r["1차매수"])
             if code in held or grade!="강력관심" or score<82 or entry<=0:
                 continue
             cash_now=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
