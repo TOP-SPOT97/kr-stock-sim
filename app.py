@@ -13,7 +13,8 @@ def connect_db():
     con=sqlite3.connect(DB)
     con.execute("CREATE TABLE IF NOT EXISTS ledger (ts TEXT, code TEXT, name TEXT, action TEXT, price REAL, qty INTEGER, cash_after REAL, note TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS portfolio (code TEXT PRIMARY KEY, name TEXT, qty INTEGER, cost REAL)")
-    con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")\n    con.execute("CREATE TABLE IF NOT EXISTS exits (code TEXT PRIMARY KEY, sold6 INTEGER DEFAULT 0, sold8 INTEGER DEFAULT 0)")
+    con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS exits (code TEXT PRIMARY KEY, sold6 INTEGER DEFAULT 0, sold8 INTEGER DEFAULT 0)")
     if not con.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
@@ -109,7 +110,8 @@ total=cash+market
 
 st.title("📈 국내주식 공격형 모의투자 V3")
 st.caption("안정화 3단계 · 최신 종가 평가 + TOP3 분석 · 실제 주문 없음")
-st.success("V3 서버가 정상 실행 중입니다.")\nst.caption("자동 모의익절 활성화: +6% 25% / +8% 추가 25% · 실제 주문 없음")
+st.success("V3 서버가 정상 실행 중입니다.")
+st.caption("자동 모의익절 활성화: +6% 25% / +8% 추가 25% · 실제 주문 없음")
 a,b,c,d=st.columns(4)
 a.metric("총자산",f"{total:,.0f}원"); b.metric("현금",f"{cash:,.0f}원"); c.metric("주식 평가액",f"{market:,.0f}원"); d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
 if latest_day:st.caption(f"주가 데이터 기준: {latest_day} 장마감")
