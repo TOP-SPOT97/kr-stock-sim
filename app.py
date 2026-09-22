@@ -87,7 +87,21 @@ def top_scan(n):
     if not rows:return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(["점수","거래량배수"],ascending=[False,False]).head(3)
 
-con=connect_db(); cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
+con=connect_db()
+
+# One-time repair for the historical DB duplicate +6% exit bug.
+# Restore the account to the last known-good state before those erroneous DB sells.
+repair_key="repair_db_duplicate_exits_20260922_v1"
+if not con.execute("SELECT 1 FROM settings WHERE key=?",(repair_key,)).fetchone():
+    bad=con.execute("SELECT COUNT(*) FROM ledger WHERE code='012030' AND action='매도' AND note='자동 +6% 25% 분할익절'").fetchone()[0]
+    if int(bad)>1:
+        con.execute("DELETE FROM ledger WHERE code='012030' AND action='매도' AND note='자동 +6% 25% 분할익절'")
+        con.execute("INSERT OR REPLACE INTO portfolio(code,name,qty,cost) VALUES(?,?,?,?)",("012030","DB",128,199680.0))
+        con.execute("UPDATE settings SET value=? WHERE key='cash'",("411680",))
+    con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",(repair_key,"1"))
+    con.commit()
+
+cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
 positions=pd.read_sql("SELECT code,name,qty,cost FROM portfolio WHERE qty>0",con)
 valuation=[]; market=0.0; latest_day=None
 for p in positions.itertuples(index=False):
