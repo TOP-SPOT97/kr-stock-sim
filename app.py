@@ -60,11 +60,16 @@ def analyze(code,name):
 @st.cache_data(ttl=1800,show_spinner=False)
 def top_scan(n):
     rows=[]
-    for r in krx_list().head(n).itertuples(index=False):
+    universe=krx_list().head(max(n*8,160))
+    for r in universe.itertuples(index=False):
         z=analyze(r.code,r.name)
-        if z:rows.append(z)
-    if not rows:return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values("점수",ascending=False).head(3)
+        if z is not None:
+            rows.append(z)
+        if len(rows)>=n:
+            break
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(["점수","거래량배수"],ascending=[False,False]).head(3)
 
 con=connect_db(); cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
 positions=pd.read_sql("SELECT code,name,qty,cost FROM portfolio WHERE qty>0",con)
