@@ -35,7 +35,7 @@ c3.metric("보유 종목", f"{len(positions)}개")
 
 st.subheader("V3 기능 상태")
 st.write("✅ 모의계좌 · 보유종목 · 매매일지")
-st.write("🛠️ 가격평가 · TOP3 분석 · 자동매매 기능은 안정화 확인 후 순차 연결")
+st.write("✅ 보유종목 최신 종가 · 평가손익 · 총자산 계산")\nst.write("🛠️ TOP3 분석 · 자동매매 기능은 안정화 확인 후 순차 연결")
 
 st.subheader("보유 종목")
 if positions.empty:
