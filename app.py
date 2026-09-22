@@ -30,7 +30,10 @@ def paper_sell(con, code, name, qty, price, note):
     new_cost=max(0.0,old_cost-avg*qty)
     cash_now=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
     new_cash=cash_now+qty*float(price)
-    con.execute("UPDATE portfolio SET qty=?,cost=? WHERE code=?",(new_qty,new_cost,code))
+    if new_qty==0:
+        con.execute("DELETE FROM portfolio WHERE code=?",(code,))
+    else:
+        con.execute("UPDATE portfolio SET qty=?,cost=? WHERE code=?",(new_qty,new_cost,code))
     con.execute("UPDATE settings SET value=? WHERE key='cash'",(str(new_cash),))
     con.execute("INSERT INTO ledger VALUES(datetime('now','localtime'),?,?,?,?,?,?,?)",(code,name,"매도",float(price),qty,new_cash,note))
     con.commit()
@@ -118,6 +121,7 @@ for row in valuation:
     elif rate>=6 and not sold6:
         q=max(1,int(round(current_qty*0.25)))
         if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
+            con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",(k6,"1")); con.commit()
             auto_msgs.append(f"{name}: +6% 25% 모의익절")
 
 if auto_msgs:
