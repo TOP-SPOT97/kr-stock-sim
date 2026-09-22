@@ -59,107 +59,19 @@ def score_one(code,name):
 
 def init_db():
     c=sqlite3.connect(DB)
+    # Robust migration: inspect the existing V2 database first, then create/upgrade.
     c.execute("CREATE TABLE IF NOT EXISTS ledger(ts TEXT,code TEXT,name TEXT,action TEXT,price REAL,qty INTEGER,cash_after REAL,note TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS portfolio(code TEXT PRIMARY KEY,name TEXT,qty INTEGER,cost REAL,base_qty INTEGER DEFAULT 0,sold6 INTEGER DEFAULT 0,sold8 INTEGER DEFAULT 0,stop REAL DEFAULT 0)")
+    c.execute("CREATE TABLE IF NOT EXISTS portfolio(code TEXT PRIMARY KEY,name TEXT,qty INTEGER,cost REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS equity(day TEXT PRIMARY KEY,total REAL,cash REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)")
-    if not c.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():c.execute("INSERT INTO settings VALUES('cash',?)",(str(START_CAPITAL),))
-    # V2 DB migration: add V3 portfolio columns when an existing SQLite file is reused\n    cols={r[1] for r in c.execute("PRAGMA table_info(portfolio)").fetchall()}\n    for col,ddl in [("base_qty","INTEGER DEFAULT 0"),("sold6","INTEGER DEFAULT 0"),("sold8","INTEGER DEFAULT 0"),("stop","REAL DEFAULT 0")]:\n        if col not in cols:c.execute(f"ALTER TABLE portfolio ADD COLUMN {col} {ddl}")\n    c.commit();return c
+    cols={r[1] for r in c.execute("PRAGMA table_info(portfolio)").fetchall()}
+    for col,ddl in [("base_qty","INTEGER DEFAULT 0"),("sold6","INTEGER DEFAULT 0"),("sold8","INTEGER DEFAULT 0"),("stop","REAL DEFAULT 0")]:
+        if col not in cols:
+            c.execute(f"ALTER TABLE portfolio ADD COLUMN {col} {ddl}")
+    # Normalize NULLs in rows created by V2.
+    c.execute("UPDATE portfolio SET base_qty=COALESCE(base_qty,qty), sold6=COALESCE(sold6,0), sold8=COALESCE(sold8,0), stop=COALESCE(stop,0)")
+    if not c.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():
+        c.execute("INSERT INTO settings VALUES('cash',?)",(str(START_CAPITAL),))
+    c.commit()
+    return c
 
-def cash(c):return float(c.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
-def setcash(c,v):c.execute("UPDATE settings SET value=? WHERE key='cash'",(str(v),));c.commit()
-def positions(c):return pd.read_sql("SELECT * FROM portfolio WHERE qty>0",c)
-
-def trade(c,code,name,action,px,qty,note):
-    ca=cash(c)
-    row=c.execute("SELECT qty,cost,base_qty,sold6,sold8,stop FROM portfolio WHERE code=?",(code,)).fetchone()
-    oq,oc,bq,s6,s8,sp=row if row else(0,0,0,0,0,0)
-    if action=="매수":
-        qty=int(min(qty,ca//px))
-        if qty<=0:return
-        ca-=qty*px; nq=oq+qty; nc=oc+qty*px
-        c.execute("INSERT OR REPLACE INTO portfolio VALUES(?,?,?,?,?,?,?,?)",(code,name,nq,nc,bq+qty,s6,s8,sp))
-    else:
-        qty=min(int(qty),oq)
-        if qty<=0:return
-        avg=oc/oq if oq else 0; ca+=qty*px; nq=oq-qty; nc=max(0,oc-avg*qty)
-        c.execute("UPDATE portfolio SET qty=?,cost=? WHERE code=?",(nq,nc,code))
-    c.execute("INSERT INTO ledger VALUES(datetime('now','localtime'),?,?,?,?,?,?,?)",(code,name,action,px,qty,ca,note))
-    c.commit();setcash(c,ca)
-
-@st.cache_data(ttl=1800,show_spinner=False)
-def screen(n):
-    rows=[]
-    for r in listing().head(n).itertuples(index=False):
-        z=score_one(r.code,r.name)
-        if z:rows.append(z)
-    return pd.DataFrame(rows).sort_values("점수",ascending=False) if rows else pd.DataFrame()
-
-def manage_positions(c):
-    msgs=[]
-    for p in positions(c).itertuples(index=False):
-        h=price(p.code,10)
-        if h.empty:continue
-        cur=float(h.iloc[-1].Close); avg=p.cost/p.qty if p.qty else 0
-        if cur<=p.stop and p.stop>0:
-            trade(c,p.code,p.name,"매도",cur,p.qty,"자동 손절");msgs.append(f"🔻 {p.name} 자동 손절")
-        elif cur>=avg*1.08 and not p.sold8:
-            q=max(1,int(p.base_qty*.25));trade(c,p.code,p.name,"매도",cur,q,"+8% 25% 분할익절")
-            c.execute("UPDATE portfolio SET sold8=1 WHERE code=?",(p.code,));c.commit();msgs.append(f"✅ {p.name} +8% 분할익절")
-        elif cur>=avg*1.06 and not p.sold6:
-            q=max(1,int(p.base_qty*.25));trade(c,p.code,p.name,"매도",cur,q,"+6% 25% 분할익절")
-            c.execute("UPDATE portfolio SET sold6=1 WHERE code=?",(p.code,));c.commit();msgs.append(f"✅ {p.name} +6% 분할익절")
-    return msgs
-
-con=init_db()
-st.title("📈 국내주식 공격형 모의투자 v3")
-st.caption("자동 스크리닝 · TOP3 모의매매 · +6%/+8% 분할익절 · 자동손절 · 자산곡선 · 실제 주문 없음")
-with st.sidebar:
-    universe_n=st.slider("검색 종목 수",30,200,80,10)
-    order_budget=st.number_input("종목당 진입 한도",50000,400000,250000,10000)
-    auto_trade=st.toggle("TOP3 자동 모의매매",True)
-    st.caption("무료판: 앱을 열거나 새로고침할 때 최신 데이터로 자동 실행")
-
-with st.spinner("최신 장마감 데이터 자동 분석 중..."):
-    scr=screen(universe_n)
-for m in manage_positions(con):st.toast(m)
-
-if not scr.empty:
-    top=scr.head(3).copy();top.insert(0,"순위",range(1,len(top)+1))
-    st.subheader(f"오늘의 자동 TOP3 · 데이터 기준 {top.iloc[0]['date']}")
-    st.dataframe(top[["순위","종목","등급","종가","점수","RSI","20일수익률%","거래량배수","1차매수","2차매수","추격금지","1차목표","2차목표","손절"]],use_container_width=True,hide_index=True)
-    if auto_trade:
-        held=set(positions(con)["code"].astype(str))
-        for _,r in top.iterrows():
-            if str(r["code"]) not in held and len(positions(con))<3 and r["점수"]>=68 and r["종가"]<=r["추격금지"]:
-                qty=int(order_budget//r["종가"])
-                trade(con,str(r["code"]),r["종목"],"매수",float(r["종가"]),qty,"TOP3 자동 진입")
-                con.execute("UPDATE portfolio SET stop=? WHERE code=?",(float(r["손절"]),str(r["code"])));con.commit()
-                held.add(str(r["code"]))
-else:st.warning("스크리닝 데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")
-
-pos=positions(con); ca=cash(con); rows=[]; mv=0
-for p in pos.itertuples(index=False):
-    h=price(p.code,10);cur=float(h.iloc[-1].Close) if not h.empty else p.cost/p.qty
-    avg=p.cost/p.qty;value=p.qty*cur;mv+=value
-    rows.append({"종목":p.name,"수량":p.qty,"평균단가":round(avg),"현재가":round(cur),"평가금액":round(value),"평가손익":round(value-p.cost),"수익률%":round((cur/avg-1)*100,2),"손절가":round(p.stop)})
-total=ca+mv
-con.execute("INSERT OR REPLACE INTO equity VALUES(?,?,?)",(str(date.today()),total,ca));con.commit()
-a,b,c,d=st.columns(4);a.metric("총자산",f"{total:,.0f}원");b.metric("현금",f"{ca:,.0f}원");c.metric("주식 평가액",f"{mv:,.0f}원");d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
-
-st.subheader("보유 종목")
-if rows:st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-else:st.caption("현재 보유 종목이 없습니다.")
-eq=pd.read_sql("SELECT * FROM equity ORDER BY day",con)
-st.subheader("자산 변화")
-if not eq.empty:
-    eq["day"]=pd.to_datetime(eq["day"]);st.line_chart(eq.set_index("day")["total"])
-st.subheader("매매일지")
-led=pd.read_sql("SELECT * FROM ledger ORDER BY ts DESC",con)
-if not led.empty:st.dataframe(led,use_container_width=True,hide_index=True)
-
-with st.expander("V3 데이터 확장 상태"):
-    st.write("✅ 가격·거래량·추세·RSI·모멘텀 / 자동 TOP3 / 자동 분할익절·손절 / 자산곡선")
-    st.write("🟡 외국인·기관 수급 / 실적·PER·PBR / 뉴스 호재·악재는 무료 데이터 소스 연동을 다음 단계에서 추가")
-    st.info("Streamlit 무료 서버는 상시 실행 서버가 아니므로, 현재 자동화는 앱 접속/새로고침 시 실행됩니다. 완전 무인 장마감 실행은 별도 무료 스케줄러와 영구 DB를 연결해야 합니다.")
-st.caption("모의투자용이며 실제 주문을 실행하지 않고 수익을 보장하지 않습니다.")
