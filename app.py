@@ -15,6 +15,11 @@ def connect_db():
     con.execute("CREATE TABLE IF NOT EXISTS portfolio (code TEXT PRIMARY KEY, name TEXT, qty INTEGER, cost REAL)")
     con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS exits (code TEXT PRIMARY KEY, sold6 INTEGER DEFAULT 0, sold8 INTEGER DEFAULT 0)")
+    exit_cols=[r[1] for r in con.execute("PRAGMA table_info(exits)").fetchall()]
+    if "sold6" not in exit_cols:
+        con.execute("ALTER TABLE exits ADD COLUMN sold6 INTEGER DEFAULT 0")
+    if "sold8" not in exit_cols:
+        con.execute("ALTER TABLE exits ADD COLUMN sold8 INTEGER DEFAULT 0")
     if not con.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
