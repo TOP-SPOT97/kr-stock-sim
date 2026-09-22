@@ -133,6 +133,24 @@ for row in valuation:
         if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
             auto_msgs.append(f"{name}: +6% 25% 모의익절")
 
+# Remaining-position exit rules after staged profit-taking.
+# 1) Hard stop: -6% from average cost.
+# 2) After both +6% and +8% exits, protect the remaining 50% at +3% from average cost.
+# This is deliberately price-based for stability; trend-based trailing exits can be added after this stage is verified.
+for row in valuation:
+    code=row["종목코드"]; name=row["종목"]; price=float(row["현재가"]); avg=float(row["평균단가"])
+    pos=con.execute("SELECT qty FROM portfolio WHERE code=?",(code,)).fetchone()
+    if not pos or int(pos[0])<=0:continue
+    sold6=bool(con.execute("SELECT 1 FROM ledger WHERE code=? AND action='매도' AND note='자동 +6% 25% 분할익절' LIMIT 1",(code,)).fetchone())
+    sold8=bool(con.execute("SELECT 1 FROM ledger WHERE code=? AND action='매도' AND note='자동 +8% 추가 25% 분할익절' LIMIT 1",(code,)).fetchone())
+    qty=int(pos[0])
+    if price <= avg*0.94:
+        if paper_sell(con,code,name,qty,price,"자동 손절 -6%"):
+            auto_msgs.append(f"{name}: -6% 자동 모의손절")
+    elif sold6 and sold8 and price <= avg*1.03:
+        if paper_sell(con,code,name,qty,price,"자동 잔여50% 수익보호 +3%"):
+            auto_msgs.append(f"{name}: 잔여 50% +3% 수익보호 청산")
+
 if auto_msgs:
     st.toast(" / ".join(auto_msgs))
     st.rerun()
@@ -143,7 +161,7 @@ total=cash+market
 st.title("📈 국내주식 공격형 모의투자 V3")
 st.caption("안정화 3단계 · 최신 종가 평가 + TOP3 분석 · 실제 주문 없음")
 st.success("V3 서버가 정상 실행 중입니다.")
-st.caption("자동 모의익절 활성화: +6% 25% / +8% 추가 25% · 실제 주문 없음")
+st.caption("자동 모의매매: +6% 25% / +8% 추가 25% 익절 · -6% 손절 · 2회 익절 후 잔여 50% +3% 수익보호 · 실제 주문 없음")
 a,b,c,d=st.columns(4)
 a.metric("총자산",f"{total:,.0f}원"); b.metric("현금",f"{cash:,.0f}원"); c.metric("주식 평가액",f"{market:,.0f}원"); d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
 if latest_day:st.caption(f"주가 데이터 기준: {latest_day} 장마감")
