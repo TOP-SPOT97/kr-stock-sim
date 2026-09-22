@@ -14,11 +14,6 @@ def connect_db():
     con.execute("CREATE TABLE IF NOT EXISTS ledger (ts TEXT, code TEXT, name TEXT, action TEXT, price REAL, qty INTEGER, cash_after REAL, note TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS portfolio (code TEXT PRIMARY KEY, name TEXT, qty INTEGER, cost REAL)")
     con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-    con.execute("CREATE TABLE IF NOT EXISTS staged_profit_exits_v4 (code TEXT PRIMARY KEY, sold6 INTEGER DEFAULT 0, sold8 INTEGER DEFAULT 0)")
-    exit_cols={r[1] for r in con.execute("PRAGMA table_info(staged_profit_exits_v4)").fetchall()}
-    if not {"code","sold6","sold8"}.issubset(exit_cols):
-        con.execute("DROP TABLE IF EXISTS staged_profit_exits_v4")
-        con.execute("CREATE TABLE staged_profit_exits_v4 (code TEXT PRIMARY KEY, sold6 INTEGER NOT NULL DEFAULT 0, sold8 INTEGER NOT NULL DEFAULT 0)")
     if not con.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
@@ -104,26 +99,25 @@ for row in valuation:
     code=row["종목코드"]; name=row["종목"]; rate=float(row["수익률%"]); price=float(row["현재가"])
     pos=con.execute("SELECT qty FROM portfolio WHERE code=?",(code,)).fetchone()
     if not pos or int(pos[0])<=0:continue
-    con.execute("INSERT OR IGNORE INTO staged_profit_exits_v4 (code, sold6, sold8) VALUES (?, ?, ?)",(code,0,0))
-    state=con.execute("SELECT sold6,sold8 FROM staged_profit_exits_v4 WHERE code=?",(code,)).fetchone()
-    if state is None:
-        continue
-    sold6,sold8=int(state[0]),int(state[1])
+    k6=f"exit6_{code}"; k8=f"exit8_{code}"
+    r6=con.execute("SELECT value FROM settings WHERE key=?",(k6,)).fetchone()
+    r8=con.execute("SELECT value FROM settings WHERE key=?",(k8,)).fetchone()
+    sold6=int(r6[0]) if r6 else 0
+    sold8=int(r8[0]) if r8 else 0
     current_qty=int(pos[0])
     if rate>=8 and not sold8:
         if not sold6:
             q=max(1,int(round(current_qty*0.25)))
             if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
-                con.execute("UPDATE staged_profit_exits_v4 SET sold6=1 WHERE code=?",(code,)); con.commit()
+                con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",(k6,"1")); con.commit()
                 current_qty-=q; auto_msgs.append(f"{name}: +6% 25% 모의익절")
         q=max(1,int(round(current_qty/3))) if current_qty>0 else 0
         if q and paper_sell(con,code,name,q,price,"자동 +8% 추가 25% 분할익절"):
-            con.execute("UPDATE staged_profit_exits_v4 SET sold8=1 WHERE code=?",(code,)); con.commit()
+            con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",(k8,"1")); con.commit()
             auto_msgs.append(f"{name}: +8% 추가 25% 모의익절")
     elif rate>=6 and not sold6:
         q=max(1,int(round(current_qty*0.25)))
         if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
-            con.execute("UPDATE staged_profit_exits_v4 SET sold6=1 WHERE code=?",(code,)); con.commit()
             auto_msgs.append(f"{name}: +6% 25% 모의익절")
 
 if auto_msgs:
