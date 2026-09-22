@@ -42,18 +42,16 @@ def analyze(code,name):
         x["ma5"]=x.Close.rolling(5).mean(); x["ma20"]=x.Close.rolling(20).mean(); x["ma60"]=x.Close.rolling(60).mean()
         x["vma20"]=x.Volume.rolling(20).mean(); x["ret20"]=x.Close.pct_change(20)*100
         d=x.Close.diff(); up=d.clip(lower=0); dn=-d.clip(upper=0)
-        rs=up.rolling(14).mean()/dn.rolling(14).mean().replace(0,np.nan)
-        x["rsi"]=100-(100/(1+rs))
+        rs=up.rolling(14).mean()/dn.rolling(14).mean().replace(0,np.nan); x["rsi"]=100-(100/(1+rs))
         r=x.iloc[-1]; close=float(r.Close); vma=float(r.vma20) if pd.notna(r.vma20) else 0
         if not 1000<=close<=30000 or vma<80000:return None
         trend=(18 if close>r.ma20 else -8)+(12 if r.ma20>r.ma60 else -6)+(8 if r.ma5>r.ma20 else 0)
         volume=min(18,max(-4,((float(r.Volume)/vma)-1)*12)) if vma else 0
-        momentum=max(-10,min(18,float(r.ret20)*0.7)); rsi=float(r.rsi) if pd.notna(r.rsi) else 50
+        momentum=max(-10,min(18,float(r.ret20)*.7)); rsi=float(r.rsi) if pd.notna(r.rsi) else 50
         heat=-18 if rsi>=75 else(-8 if rsi>=68 else(5 if 42<=rsi<=62 else 0))
         score=max(0,min(100,50+trend+volume+momentum+heat))
         grade="강력관심" if score>=82 else("상승관심" if score>=68 else("중립" if score>=52 else("하락주의" if score>=38 else "고위험")))
-        e1=round((min(float(r.ma20),close)*.99)/10)*10
-        e2=round((e1*.95)/10)*10
+        e1=round((min(float(r.ma20),close)*.99)/10)*10; e2=round(e1*.95/10)*10
         return {"종목코드":code,"종목":name,"종가":round(close),"점수":round(score,1),"등급":grade,"RSI":round(rsi,1),"20일수익률%":round(float(r.ret20),1),"거래량배수":round(float(r.Volume)/vma,2),"1차매수":int(e1),"2차매수":int(e2),"추격금지":int(round(close*1.04/10)*10),"1차목표":int(round(e1*1.075/10)*10),"2차목표":int(round(e1*1.15/10)*10),"손절":int(round(e2*.94/10)*10),"기준일":str(pd.to_datetime(x.index[-1]).date())}
     except Exception:return None
 
@@ -63,12 +61,9 @@ def top_scan(n):
     universe=krx_list().head(max(n*8,160))
     for r in universe.itertuples(index=False):
         z=analyze(r.code,r.name)
-        if z is not None:
-            rows.append(z)
-        if len(rows)>=n:
-            break
-    if not rows:
-        return pd.DataFrame()
+        if z is not None:rows.append(z)
+        if len(rows)>=n:break
+    if not rows:return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(["점수","거래량배수"],ascending=[False,False]).head(3)
 
 con=connect_db(); cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
@@ -84,18 +79,22 @@ total=cash+market
 st.title("📈 국내주식 공격형 모의투자 V3")
 st.caption("안정화 3단계 · 최신 종가 평가 + TOP3 분석 · 실제 주문 없음")
 st.success("V3 서버가 정상 실행 중입니다.")
-a,b,c,d=st.columns(4); a.metric("총자산",f"{total:,.0f}원"); b.metric("현금",f"{cash:,.0f}원"); c.metric("주식 평가액",f"{market:,.0f}원"); d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
+a,b,c,d=st.columns(4)
+a.metric("총자산",f"{total:,.0f}원"); b.metric("현금",f"{cash:,.0f}원"); c.metric("주식 평가액",f"{market:,.0f}원"); d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
 if latest_day:st.caption(f"주가 데이터 기준: {latest_day} 장마감")
 
 st.subheader("오늘의 TOP3 분석")
-scan_n=st.slider("분석 종목 수",10,50,20,10)
+scan_n=st.slider("분석 후보 수",10,40,20,10)
 if st.button("🔎 TOP3 분석 실행",type="primary"):
-    with st.spinner("종목 분석 중입니다..."):
-        st.session_state["top3"]=top_scan(scan_n)
+    with st.spinner("후보 종목을 분석 중입니다. 무료 서버에서는 잠시 걸릴 수 있습니다."):
+        result=top_scan(scan_n)
+    st.session_state["top3"]=result
 top3=st.session_state.get("top3",pd.DataFrame())
-if not top3.empty:
+if isinstance(top3,pd.DataFrame) and not top3.empty:
     st.dataframe(top3,use_container_width=True,hide_index=True)
-    st.caption("현재 단계에서는 분석만 하며 자동 매수/매도는 실행하지 않습니다.")
+    st.caption("현재 단계에서는 후보 분석만 하며 자동 매수/매도는 실행하지 않습니다.")
+elif "top3" in st.session_state:
+    st.warning("조건을 통과한 후보가 없습니다. 분석 후보 수를 늘려 다시 실행해 주세요.")
 else:
     st.info("TOP3 분석 실행 버튼을 눌러 후보를 확인하세요.")
 
@@ -107,20 +106,4 @@ st.subheader("매매일지")
 ledger=pd.read_sql("SELECT * FROM ledger ORDER BY ts DESC",con)
 if ledger.empty:st.caption("아직 체결된 모의매매가 없습니다.")
 else:st.dataframe(ledger,use_container_width=True,hide_index=True)
-st.caption("모의투자용이며 실제 주문을 실행하지 않고 수익을 보장하지 않습니다.")@st.cache_data(ttl=1800,show_spinner=False)
-def top_scan(n):
-    rows=[]
-    universe=krx_list()
-    # Listing order is not a useful trading universe. Scan liquid, familiar-priced names
-    # across a broader slice, while keeping the free server workload bounded.
-    sample=universe.head(max(n*8,160))
-    for r in sample.itertuples(index=False):
-        z=analyze(r.code,r.name)
-        if z is not None:
-            rows.append(z)
-        if len(rows)>=n:
-            break
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values(["점수","거래량배수"],ascending=[False,False]).head(3)
-
+st.caption("모의투자용이며 실제 주문을 실행하지 않고 수익을 보장하지 않습니다.")
