@@ -18,6 +18,25 @@ def connect_db():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
 
+def paper_buy(con, code, name, qty, price, note):
+    qty=int(qty); price=float(price)
+    if qty<=0 or price<=0:
+        return False
+    cash_now=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
+    amount=qty*price
+    if amount>cash_now:
+        return False
+    row=con.execute("SELECT qty,cost FROM portfolio WHERE code=?",(code,)).fetchone()
+    if row:
+        con.execute("UPDATE portfolio SET qty=?,cost=?,name=? WHERE code=?",(int(row[0])+qty,float(row[1])+amount,name,code))
+    else:
+        con.execute("INSERT INTO portfolio(code,name,qty,cost) VALUES(?,?,?,?)",(code,name,qty,amount))
+    new_cash=cash_now-amount
+    con.execute("UPDATE settings SET value=? WHERE key='cash'",(str(new_cash),))
+    con.execute("INSERT INTO ledger VALUES(datetime('now','localtime'),?,?,?,?,?,?,?)",(code,name,"매수",price,qty,new_cash,note))
+    con.commit()
+    return True
+
 def paper_sell(con, code, name, qty, price, note):
     row=con.execute("SELECT qty,cost FROM portfolio WHERE code=?",(code,)).fetchone()
     if not row:
@@ -175,7 +194,30 @@ if st.button("🔎 TOP3 분석 실행",type="primary"):
 top3=st.session_state.get("top3",pd.DataFrame())
 if isinstance(top3,pd.DataFrame) and not top3.empty:
     st.dataframe(top3,use_container_width=True,hide_index=True)
-    st.caption("현재 단계에서는 후보 분석만 하며 자동 매수/매도는 실행하지 않습니다.")
+    st.caption("1단계 안전모드: TOP3 중 강력관심 종목만 자동 모의매수할 수 있습니다. 종목교체는 아직 실행하지 않습니다.")
+    auto_buy=st.toggle("TOP3 안전 자동 모의매수",value=False)
+    per_budget=st.number_input("종목당 진입 한도",min_value=50000,max_value=300000,value=200000,step=10000)
+    if auto_buy and st.button("TOP3 안전 자동매수 실행"):
+        held={str(x[0]).zfill(6) for x in con.execute("SELECT code FROM portfolio WHERE qty>0").fetchall()}
+        bought=[]
+        for r in top3.itertuples(index=False):
+            code=str(getattr(r,"종목코드")).zfill(6); name=str(getattr(r,"종목"))
+            score=float(getattr(r,"점수")); grade=str(getattr(r,"등급")); entry=float(getattr(r,"1차매수"))
+            if code in held or grade!="강력관심" or score<82 or entry<=0:
+                continue
+            cash_now=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
+            budget=min(float(per_budget),cash_now)
+            qty=int(budget//entry)
+            if qty>0 and paper_buy(con,code,name,qty,entry,"TOP3 강력관심 안전 자동진입"):
+                bought.append(f"{name} {qty}주")
+                held.add(code)
+            if len(held)>=3:
+                break
+        if bought:
+            st.success("모의매수 완료: "+" / ".join(bought))
+            st.rerun()
+        else:
+            st.info("신규 매수 조건을 충족한 종목이 없습니다. 기존 보유 3종목 제한과 강력관심 기준을 유지했습니다.")
 elif "top3" in st.session_state:
     st.warning("조건을 통과한 후보가 없습니다. 분석 후보 수를 늘려 다시 실행해 주세요.")
 else:
