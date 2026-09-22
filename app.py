@@ -24,6 +24,24 @@ def connect_db():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
 
+def paper_sell(con, code, name, qty, price, note):
+    row=con.execute("SELECT qty,cost FROM portfolio WHERE code=?",(code,)).fetchone()
+    if not row:
+        return False
+    old_qty=int(row[0]); old_cost=float(row[1]); qty=min(int(qty),old_qty)
+    if qty<=0:
+        return False
+    avg=old_cost/old_qty
+    new_qty=old_qty-qty
+    new_cost=max(0.0,old_cost-avg*qty)
+    cash_now=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
+    new_cash=cash_now+qty*float(price)
+    con.execute("UPDATE portfolio SET qty=?,cost=? WHERE code=?",(new_qty,new_cost,code))
+    con.execute("UPDATE settings SET value=? WHERE key='cash'",(str(new_cash),))
+    con.execute("INSERT INTO ledger VALUES(datetime('now','localtime'),?,?,?,?,?,?,?)",(code,name,"매도",float(price),qty,new_cash,note))
+    con.commit()
+    return True
+
 @st.cache_data(ttl=900,show_spinner=False)
 def latest_close(code):
     try:
