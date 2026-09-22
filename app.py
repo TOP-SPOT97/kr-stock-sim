@@ -174,7 +174,15 @@ if auto_msgs:
     st.toast(" / ".join(auto_msgs))
     st.rerun()
 
+# Recalculate the portfolio after any automatic exits so dashboard totals are never stale.
 cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
+positions=pd.read_sql("SELECT code,name,qty,cost FROM portfolio WHERE qty>0",con)
+valuation=[]; market=0.0; latest_day=None
+for p in positions.itertuples(index=False):
+    avg=float(p.cost)/int(p.qty); cur,day=latest_close(p.code); cur=avg if cur is None else cur
+    value=int(p.qty)*cur; pnl=value-float(p.cost); market+=value
+    if day and (latest_day is None or day>latest_day):latest_day=day
+    valuation.append({"종목코드":str(p.code).zfill(6),"종목":p.name,"수량":int(p.qty),"평균단가":round(avg),"현재가":round(cur),"평가금액":round(value),"평가손익":round(pnl),"수익률%":round((cur/avg-1)*100,2)})
 total=cash+market
 
 st.title("📈 국내주식 공격형 모의투자 V3")
