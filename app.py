@@ -110,7 +110,8 @@ for p in positions.itertuples(index=False):
     if day and (latest_day is None or day>latest_day):latest_day=day
     valuation.append({"종목코드":str(p.code).zfill(6),"종목":p.name,"수량":int(p.qty),"평균단가":round(avg),"현재가":round(cur),"평가금액":round(value),"평가손익":round(pnl),"수익률%":round((cur/avg-1)*100,2)})
 # Automatic paper exits: +6% sell 25%, +8% sell another 25%.
-# Use original quantity reconstructed from current holding plus prior staged sales.
+# Quantity rule: first exit = 25% of then-current holding; second exit = one third
+# of the remaining 75%, which equals another 25% of the original position.
 auto_msgs=[]
 for row in valuation:
     code=row["종목코드"]; name=row["종목"]; rate=float(row["수익률%"]); price=float(row["현재가"])
