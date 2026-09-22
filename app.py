@@ -102,4 +102,20 @@ st.subheader("매매일지")
 ledger=pd.read_sql("SELECT * FROM ledger ORDER BY ts DESC",con)
 if ledger.empty:st.caption("아직 체결된 모의매매가 없습니다.")
 else:st.dataframe(ledger,use_container_width=True,hide_index=True)
-st.caption("모의투자용이며 실제 주문을 실행하지 않고 수익을 보장하지 않습니다.")
+st.caption("모의투자용이며 실제 주문을 실행하지 않고 수익을 보장하지 않습니다.")@st.cache_data(ttl=1800,show_spinner=False)
+def top_scan(n):
+    rows=[]
+    universe=krx_list()
+    # Listing order is not a useful trading universe. Scan liquid, familiar-priced names
+    # across a broader slice, while keeping the free server workload bounded.
+    sample=universe.head(max(n*8,160))
+    for r in sample.itertuples(index=False):
+        z=analyze(r.code,r.name)
+        if z is not None:
+            rows.append(z)
+        if len(rows)>=n:
+            break
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(["점수","거래량배수"],ascending=[False,False]).head(3)
+
