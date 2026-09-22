@@ -64,7 +64,7 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS equity(day TEXT PRIMARY KEY,total REAL,cash REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)")
     if not c.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():c.execute("INSERT INTO settings VALUES('cash',?)",(str(START_CAPITAL),))
-    c.commit();return c
+    # V2 DB migration: add V3 portfolio columns when an existing SQLite file is reused\n    cols={r[1] for r in c.execute("PRAGMA table_info(portfolio)").fetchall()}\n    for col,ddl in [("base_qty","INTEGER DEFAULT 0"),("sold6","INTEGER DEFAULT 0"),("sold8","INTEGER DEFAULT 0"),("stop","REAL DEFAULT 0")]:\n        if col not in cols:c.execute(f"ALTER TABLE portfolio ADD COLUMN {col} {ddl}")\n    c.commit();return c
 
 def cash(c):return float(c.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
 def setcash(c,v):c.execute("UPDATE settings SET value=? WHERE key='cash'",(str(v),));c.commit()
