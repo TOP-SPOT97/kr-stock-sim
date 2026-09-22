@@ -13,7 +13,7 @@ def connect_db():
     con=sqlite3.connect(DB)
     con.execute("CREATE TABLE IF NOT EXISTS ledger (ts TEXT, code TEXT, name TEXT, action TEXT, price REAL, qty INTEGER, cash_after REAL, note TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS portfolio (code TEXT PRIMARY KEY, name TEXT, qty INTEGER, cost REAL)")
-    con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")\n    con.execute("CREATE TABLE IF NOT EXISTS exits (code TEXT PRIMARY KEY, sold6 INTEGER DEFAULT 0, sold8 INTEGER DEFAULT 0)")
     if not con.execute("SELECT 1 FROM settings WHERE key='cash'").fetchone():
         con.execute("INSERT INTO settings VALUES ('cash',?)",(str(START_CAPITAL),))
     con.commit(); return con
@@ -74,11 +74,42 @@ for p in positions.itertuples(index=False):
     value=int(p.qty)*cur; pnl=value-float(p.cost); market+=value
     if day and (latest_day is None or day>latest_day):latest_day=day
     valuation.append({"종목코드":str(p.code).zfill(6),"종목":p.name,"수량":int(p.qty),"평균단가":round(avg),"현재가":round(cur),"평가금액":round(value),"평가손익":round(pnl),"수익률%":round((cur/avg-1)*100,2)})
+# Automatic paper exits: +6% sell 25%, +8% sell another 25%.
+# Use original quantity reconstructed from current holding plus prior staged sales.
+auto_msgs=[]
+for row in valuation:
+    code=row["종목코드"]; name=row["종목"]; rate=float(row["수익률%"]); price=float(row["현재가"])
+    pos=con.execute("SELECT qty FROM portfolio WHERE code=?",(code,)).fetchone()
+    if not pos or int(pos[0])<=0:continue
+    con.execute("INSERT OR IGNORE INTO exits(code,sold6,sold8) VALUES(?,0,0)",(code,))
+    sold6,sold8=con.execute("SELECT sold6,sold8 FROM exits WHERE code=?",(code,)).fetchone()
+    current_qty=int(pos[0])
+    if rate>=8 and not sold8:
+        if not sold6:
+            q=max(1,int(round(current_qty*0.25)))
+            if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
+                con.execute("UPDATE exits SET sold6=1 WHERE code=?",(code,)); con.commit()
+                current_qty-=q; auto_msgs.append(f"{name}: +6% 25% 모의익절")
+        q=max(1,int(round(current_qty/3))) if current_qty>0 else 0
+        if q and paper_sell(con,code,name,q,price,"자동 +8% 추가 25% 분할익절"):
+            con.execute("UPDATE exits SET sold8=1 WHERE code=?",(code,)); con.commit()
+            auto_msgs.append(f"{name}: +8% 추가 25% 모의익절")
+    elif rate>=6 and not sold6:
+        q=max(1,int(round(current_qty*0.25)))
+        if paper_sell(con,code,name,q,price,"자동 +6% 25% 분할익절"):
+            con.execute("UPDATE exits SET sold6=1 WHERE code=?",(code,)); con.commit()
+            auto_msgs.append(f"{name}: +6% 25% 모의익절")
+
+if auto_msgs:
+    st.toast(" / ".join(auto_msgs))
+    st.rerun()
+
+cash=float(con.execute("SELECT value FROM settings WHERE key='cash'").fetchone()[0])
 total=cash+market
 
 st.title("📈 국내주식 공격형 모의투자 V3")
 st.caption("안정화 3단계 · 최신 종가 평가 + TOP3 분석 · 실제 주문 없음")
-st.success("V3 서버가 정상 실행 중입니다.")
+st.success("V3 서버가 정상 실행 중입니다.")\nst.caption("자동 모의익절 활성화: +6% 25% / +8% 추가 25% · 실제 주문 없음")
 a,b,c,d=st.columns(4)
 a.metric("총자산",f"{total:,.0f}원"); b.metric("현금",f"{cash:,.0f}원"); c.metric("주식 평가액",f"{market:,.0f}원"); d.metric("누적수익률",f"{(total/START_CAPITAL-1)*100:.2f}%")
 if latest_day:st.caption(f"주가 데이터 기준: {latest_day} 장마감")
